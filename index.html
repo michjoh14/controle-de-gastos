@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Controle de Gastos</title>
+<meta name="description" content="Contas, receitas e assinaturas do mês, num lugar só.">
+<meta name="theme-color" content="#0f7a5c">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/favicon.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <img src="icons/icon-192.png" alt="" width="32" height="32">
+    <span>Controle de Gastos</span>
+  </div>
+  <div class="monthnav" id="monthnav">
+    <button class="icon-btn" id="prevMonth" aria-label="Mês anterior">‹</button>
+    <button class="month-label" id="monthLabel" aria-label="Voltar para o mês atual"></button>
+    <button class="icon-btn" id="nextMonth" aria-label="Próximo mês">›</button>
+  </div>
+  <button class="install-btn" id="installBtn" hidden>Instalar app</button>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button data-view="mes" class="active"><svg viewBox="0 0 24 24"><path d="M4 5h16v15H4zM4 9h16M8 3v4M16 3v4"/></svg><span>Mês</span></button>
+  <button data-view="historico"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Histórico</span></button>
+  <button data-view="assinaturas"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4"/></svg><span>Assinaturas</span></button>
+  <button data-view="ajustes"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="7" cy="18" r="2"/></svg><span>Ajustes</span></button>
+</nav>
+
+<main id="main"></main>
+
+<button class="fab" id="fab" aria-label="Adicionar conta">+</button>
+
+<dialog id="sheet"><form method="dialog" id="sheetForm" novalidate></form></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<input type="file" id="fileInput" accept=".json,application/json" hidden>
+
+<script src="app.js"></script>
+</body>
+</html>
