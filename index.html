@@ -25,6 +25,7 @@
     <button class="month-label" id="monthLabel" aria-label="Voltar para o mês atual"></button>
     <button class="icon-btn" id="nextMonth" aria-label="Próximo mês">›</button>
   </div>
+  <button class="sync-badge" id="syncBadge" data-act="sync" data-estado="desligado"><i></i><span>Entrar</span></button>
   <button class="install-btn" id="installBtn" hidden>Instalar app</button>
 </header>
 
@@ -43,6 +44,10 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="fileInput" accept=".json,application/json" hidden>
 
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

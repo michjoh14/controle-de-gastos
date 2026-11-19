@@ -1,6 +1,6 @@
 // Service worker: deixa o app abrir mesmo sem internet.
-const CACHE = 'gastos-v1';
-const FILES = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
+const CACHE = 'gastos-v2';
+const FILES = ['./', 'index.html', 'style.css', 'app.js', 'firebase-config.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png', 'icons/favicon.png'];
 
 self.addEventListener('install', e => {

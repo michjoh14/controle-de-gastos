@@ -8,6 +8,7 @@ const SITUACOES = ['Pendente', 'Pago', 'Quitado', 'Atrasado', 'Devendo', 'Cancel
 const PERIODOS = { Mensal: 1, Trimestral: 3, Semestral: 6, Anual: 12 };
 const SIT_ASS = ['Ativo', 'Pausado', 'Cancelado'];
 const CORES = ['#0f7a5c', '#3b6fd8', '#d1882a', '#8a4fc9', '#c94f6d', '#2a9bb0', '#7a8a1f', '#b0563a', '#5a6b8c', '#9a7b4f', '#4f9a6b', '#a04f9a'];
+const GOOGLE_G = '<svg width="16" height="16" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>';
 const CATS_PADRAO = ['Bancos e cartões', 'Contas da casa', 'Telefone', 'Parcelados', 'Dízimo', 'Pessoas', 'Veículo e documentos', 'Investimentos', 'Outros'];
 
 const $ = s => document.querySelector(s);
@@ -58,9 +59,89 @@ function carregar() {
   } catch (e) { console.warn(e); }
   return vazio();
 }
-function salvar() {
+function salvar(semNuvem) {
   try { localStorage.setItem(KEY, JSON.stringify(db)); }
   catch (e) { toast('Não consegui salvar neste navegador. Exporte um backup.'); }
+  if (!semNuvem) nuvem.enviar();
+}
+
+/* ---------- Sincronização (Firebase: login com Google + Firestore) ---------- */
+const nuvem = {
+  ok: false, usuario: null, ref: null, estado: 'desligado', timer: null, ultimoTexto: null,
+  iniciar() {
+    if (!window.firebase || !window.FIREBASE_CONFIG || !FIREBASE_CONFIG.apiKey) return;
+    try {
+      firebase.initializeApp(FIREBASE_CONFIG);
+      const fs = firebase.firestore();
+      fs.enablePersistence({ synchronizeTabs: true }).catch(() => {});
+      this.ok = true;
+      firebase.auth().getRedirectResult().catch(e => this.erro(e));
+      firebase.auth().onAuthStateChanged(u => this.mudouUsuario(u));
+    } catch (e) { console.warn(e); }
+  },
+  async entrar() {
+    if (!this.ok) { toast('Sincronização indisponível no momento. Verifique a internet.'); return; }
+    const p = new firebase.auth.GoogleAuthProvider();
+    p.setCustomParameters({ prompt: 'select_account' });
+    try { await firebase.auth().signInWithPopup(p); }
+    catch (e) {
+      if (['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'].includes(e.code)) firebase.auth().signInWithRedirect(p);
+      else this.erro(e);
+    }
+  },
+  sair() { firebase.auth().signOut(); toast('Você saiu. Os dados continuam neste aparelho.'); },
+  erro(e) {
+    if (!e || e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') return;
+    console.warn(e); toast('Não consegui entrar: ' + (e.message || e.code));
+  },
+  mudouUsuario(u) {
+    if (this.unsub) { this.unsub(); this.unsub = null; }
+    this.usuario = u; this.ref = null; this.ultimoTexto = null;
+    if (!u) { this.estado = 'desligado'; render(); return; }
+    this.estado = 'sincronizando'; render();
+    this.ref = firebase.firestore().collection('usuarios').doc(u.uid);
+    let primeira = true;
+    this.unsub = this.ref.onSnapshot({ includeMetadataChanges: true }, snap => {
+      if (snap.metadata.hasPendingWrites) { this.estado = 'enviando'; atualizarSync(); return; }
+      this.estado = snap.metadata.fromCache ? 'offline' : 'ok';
+      if (!snap.exists) {
+        if (primeira && db.iniciado) this.enviar(true); // primeira vez: sobe o que já está neste aparelho
+        primeira = false; atualizarSync(); return;
+      }
+      const texto = snap.data().dados;
+      if (texto && texto !== this.ultimoTexto && texto !== textoDb()) {
+        if (primeira && db.iniciado && db.lancamentos.length) {
+          try { localStorage.setItem(KEY + '-antes-de-sincronizar', JSON.stringify(db)); } catch (e) {}
+        }
+        const novo = JSON.parse(texto);
+        db = Object.assign(vazio(), novo, { iniciado: true });
+        this.ultimoTexto = texto;
+        salvar(true); render();
+        if (primeira) toast('Dados sincronizados com sua conta Google');
+      } else { this.ultimoTexto = texto; atualizarSync(); }
+      primeira = false;
+    }, e => { this.estado = 'erro'; console.warn(e); atualizarSync(); });
+  },
+  enviar(agora) {
+    if (!this.ref) return;
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => {
+      const texto = textoDb();
+      if (texto === this.ultimoTexto) return;
+      this.ultimoTexto = texto;
+      this.ref.set({ dados: texto, atualizado: firebase.firestore.FieldValue.serverTimestamp(), app: 'controle-gastos' })
+        .catch(e => { this.estado = 'erro'; console.warn(e); atualizarSync(); });
+    }, agora ? 0 : 500);
+  },
+};
+function textoDb() { const { iniciado, ...resto } = db; return JSON.stringify(resto); }
+const SYNC_TXT = { desligado: 'Só neste aparelho', sincronizando: 'Sincronizando…', enviando: 'Salvando na nuvem…', ok: 'Sincronizado', offline: 'Sem internet — sincroniza depois', erro: 'Erro ao sincronizar' };
+function atualizarSync() {
+  const el = $('#syncBadge'); if (!el) return;
+  el.dataset.estado = nuvem.estado;
+  el.title = SYNC_TXT[nuvem.estado];
+  el.querySelector('span').textContent = nuvem.usuario ? SYNC_TXT[nuvem.estado] : 'Entrar';
+  const s = document.getElementById('syncStatus'); if (s) s.textContent = SYNC_TXT[nuvem.estado];
 }
 let desfazer = null;
 function mudar(fn, msg) {
@@ -108,6 +189,7 @@ function render() {
   $('#monthnav').hidden = view !== 'mes' || !db.iniciado;
   $('#fab').hidden = view === 'ajustes' || !db.iniciado;
   $('#fab').setAttribute('aria-label', view === 'assinaturas' ? 'Adicionar assinatura' : 'Adicionar conta');
+  atualizarSync();
   if (!db.iniciado) { main.innerHTML = telaInicial(); return; }
   main.innerHTML = { mes: telaMes, historico: telaHistorico, assinaturas: telaAssinaturas, ajustes: telaAjustes }[view]();
 }
@@ -117,12 +199,13 @@ function telaInicial() {
   <section class="panel empty" style="padding:36px 18px">
     <img src="icons/icon-192.png" width="72" height="72" alt="" style="border-radius:18px">
     <b>Bem-vindo ao seu Controle de Gastos</b>
-    <p style="max-width:420px;margin:0">Se você tem o arquivo de backup com seus dados (<em>.json</em>), importe agora. Senão, comece do zero e vá lançando as contas do mês.</p>
+    <p style="max-width:440px;margin:0">Entre com sua conta Google para ver os mesmos dados no computador e no celular. Se for a primeira vez, importe também o arquivo com seus dados (<em>.json</em>).</p>
     <div class="btn-row" style="justify-content:center">
-      <button class="btn primary" data-act="importar">Importar meus dados</button>
+      ${nuvem.usuario ? '' : `<button class="btn primary" data-act="entrar">${GOOGLE_G} Entrar com Google</button>`}
+      <button class="btn ${nuvem.usuario ? 'primary' : ''}" data-act="importar">Importar meus dados</button>
       <button class="btn" data-act="comecar">Começar do zero</button>
     </div>
-    <p class="sub" style="margin:0">Seus dados ficam salvos só neste dispositivo.</p>
+    <p class="sub" style="margin:0">${nuvem.usuario ? `Conectado como ${esc(nuvem.usuario.email)} — ${SYNC_TXT[nuvem.estado]}` : 'Sem entrar, os dados ficam só neste aparelho.'}</p>
   </section>`;
 }
 
@@ -356,7 +439,17 @@ function telaAjustes() {
   const diasBackup = db.ultimoBackup ? -diasAte(db.ultimoBackup.slice(0, 10)) : null;
   return `
   <section class="panel">
-    <div class="panel-head"><div><h2>Backup</h2><span class="sub">Seus dados ficam salvos só neste navegador. Exporte um backup de vez em quando e guarde no Drive ou no e-mail.</span></div></div>
+    <div class="panel-head"><div><h2>Computador e celular</h2><span class="sub">Entre com a mesma conta Google em cada aparelho e tudo fica igual nos dois.</span></div></div>
+    ${nuvem.usuario ? `
+      <div class="kv"><span>Conta</span><b>${esc(nuvem.usuario.email)}</b></div>
+      <div class="kv"><span>Situação</span><b id="syncStatus">${SYNC_TXT[nuvem.estado]}</b></div>
+      <div class="btn-row" style="margin-top:8px"><button class="btn" data-act="sair">Sair da conta</button></div>`
+    : `<div class="btn-row"><button class="btn primary" data-act="entrar">${GOOGLE_G} Entrar com Google</button></div>
+       ${nuvem.ok ? '' : '<p class="sub">A sincronização precisa de internet para começar.</p>'}`}
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><div><h2>Backup</h2><span class="sub">${nuvem.usuario ? 'Seus dados já ficam guardados na sua conta. Um backup extra de vez em quando não faz mal.' : 'Sem entrar com Google, os dados ficam só neste navegador. Exporte um backup de vez em quando.'}</span></div></div>
     ${diasBackup === null || diasBackup > 30 ? `<div class="alert warn" style="margin-bottom:12px"><span class="dot"></span><div><strong>${diasBackup === null ? 'Você ainda não exportou nenhum backup' : `Último backup há ${diasBackup} dias`}</strong><span class="sub">Se limpar os dados do navegador, perde tudo que não estiver no backup.</span></div></div>` : `<p class="sub">Último backup: ${dataBR(db.ultimoBackup.slice(0, 10))}</p>`}
     <div class="btn-row">
       <button class="btn primary" data-act="exportar">Exportar backup</button>
@@ -624,6 +717,9 @@ document.addEventListener('click', e => {
     case 'exportar': exportar(); break;
     case 'importar': $('#fileInput').click(); break;
     case 'comecar': db.iniciado = true; salvar(); render(); break;
+    case 'entrar': nuvem.entrar(); break;
+    case 'sair': nuvem.sair(); break;
+    case 'sync': if (nuvem.usuario) { view = 'ajustes'; render(); } else nuvem.entrar(); break;
     case 'apagar-tudo': formApagarTudo(); break;
   }
 });
@@ -671,4 +767,5 @@ addEventListener('appinstalled', () => { $('#installBtn').hidden = true; toast('
 if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
 
+nuvem.iniciar();
 render();

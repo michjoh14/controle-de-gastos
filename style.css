@@ -55,6 +55,13 @@ button { cursor: pointer; }
 .icon-btn { width: 34px; height: 34px; border: 0; border-radius: 999px; background: transparent; font-size: 22px; line-height: 1; color: var(--muted); }
 .icon-btn:hover { background: var(--surface-2); color: var(--fg); }
 .month-label { border: 0; background: transparent; font-weight: 700; min-width: 136px; padding: 0 6px; text-transform: capitalize; }
+.sync-badge { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 700; color: var(--muted); }
+.sync-badge i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.sync-badge[data-estado="ok"] i { background: var(--ok); }
+.sync-badge[data-estado="sincronizando"] i, .sync-badge[data-estado="enviando"] i, .sync-badge[data-estado="offline"] i { background: var(--warn); }
+.sync-badge[data-estado="erro"] i { background: var(--bad); }
+.sync-badge[data-estado="desligado"] { color: var(--accent); border-color: var(--accent); }
+@media (max-width: 520px) { .sync-badge span { display: none; } .sync-badge { padding: 9px; } .sync-badge[data-estado="desligado"] span { display: inline; } }
 .install-btn { border: 0; background: var(--accent); color: var(--on-accent); font-weight: 700; padding: 8px 14px; border-radius: 999px; }
 
 /* ---------- Abas ---------- */
