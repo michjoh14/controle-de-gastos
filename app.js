@@ -85,7 +85,8 @@ const nuvem = {
     p.setCustomParameters({ prompt: 'select_account' });
     try { await firebase.auth().signInWithPopup(p); }
     catch (e) {
-      if (['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'].includes(e.code)) firebase.auth().signInWithRedirect(p);
+      if (e.code === 'auth/popup-blocked') toast('O navegador bloqueou a janela de login. Permita pop-ups para este site e toque em Entrar de novo.');
+      else if (e.code === 'auth/operation-not-supported-in-this-environment') toast('Este navegador não abre a janela de login. Abra o app no Chrome.');
       else this.erro(e);
     }
   },
