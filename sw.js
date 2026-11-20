@@ -1,5 +1,5 @@
 // Service worker: deixa o app abrir mesmo sem internet.
-const CACHE = 'gastos-v3';
+const CACHE = 'gastos-v4';
 const FILES = ['./', 'index.html', 'style.css', 'app.js', 'firebase-config.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png', 'icons/favicon.png'];
 

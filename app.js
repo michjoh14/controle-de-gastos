@@ -50,8 +50,34 @@ let anoHist = null;
 let busca = '';
 
 function vazio() {
-  return { lancamentos: [], receitas: [], assinaturas: [], itens: {}, categorias: [...CATS_PADRAO], ultimoBackup: null, iniciado: false };
+  return { lancamentos: [], receitas: [], assinaturas: [], itens: {}, categorias: [...CATS_PADRAO], ultimoBackup: null, apagados: {}, iniciado: false };
 }
+
+/* Junta duas versões dos dados sem perder nada: cada registro fica com a versão mais recente (campo mod),
+   e só some se foi apagado (apagados[id]) depois da última alteração dele. */
+const LISTAS = ['lancamentos', 'receitas', 'assinaturas'];
+function juntar(a, b) {
+  a = Object.assign(vazio(), a); b = Object.assign(vazio(), b);
+  const apagados = { ...a.apagados };
+  for (const [id, t] of Object.entries(b.apagados || {})) apagados[id] = Math.max(apagados[id] || 0, t);
+  const out = { apagados };
+  for (const k of LISTAS) {
+    const m = new Map();
+    for (const r of [...(a[k] || []), ...(b[k] || [])]) {
+      const atual = m.get(r.id);
+      if (!atual || (r.mod || 0) > (atual.mod || 0)) m.set(r.id, r);
+    }
+    out[k] = [...m.values()].filter(r => !(apagados[r.id] >= (r.mod || 0))).sort((x, y) => x.id < y.id ? -1 : x.id > y.id ? 1 : 0);
+  }
+  const itens = { ...b.itens, ...a.itens };
+  out.itens = Object.fromEntries(Object.keys(itens).sort().map(k => [k, itens[k]]));
+  out.categorias = [...a.categorias];
+  for (const c of b.categorias) if (!out.categorias.includes(c)) out.categorias.push(c);
+  out.ultimoBackup = [a.ultimoBackup, b.ultimoBackup].filter(Boolean).sort().pop() || null;
+  out.iniciado = !!(a.iniciado || b.iniciado || out.lancamentos.length || out.receitas.length);
+  return out;
+}
+const temDados = d => !!(d && (d.lancamentos?.length || d.receitas?.length || d.assinaturas?.length));
 function carregar() {
   try {
     const raw = localStorage.getItem(KEY);
@@ -105,21 +131,17 @@ const nuvem = {
     this.unsub = this.ref.onSnapshot({ includeMetadataChanges: true }, snap => {
       if (snap.metadata.hasPendingWrites) { this.estado = 'enviando'; atualizarSync(); return; }
       this.estado = snap.metadata.fromCache ? 'offline' : 'ok';
-      if (!snap.exists) {
-        if (primeira && db.iniciado) this.enviar(true); // primeira vez: sobe o que já está neste aparelho
-        primeira = false; atualizarSync(); return;
-      }
-      const texto = snap.data().dados;
-      if (texto && texto !== this.ultimoTexto && texto !== textoDb()) {
-        if (primeira && db.iniciado && db.lancamentos.length) {
-          try { localStorage.setItem(KEY + '-antes-de-sincronizar', JSON.stringify(db)); } catch (e) {}
-        }
-        const novo = JSON.parse(texto);
-        db = Object.assign(vazio(), novo, { iniciado: true });
-        this.ultimoTexto = texto;
-        salvar(true); render();
-        if (primeira) toast('Dados sincronizados com sua conta Google');
-      } else { this.ultimoTexto = texto; atualizarSync(); }
+      const texto = snap.exists ? snap.data().dados : null;
+      if (texto && texto === this.ultimoTexto) { atualizarSync(); return; }
+      // Junta o que está na nuvem com o que está neste aparelho (nunca substitui).
+      const daNuvem = texto ? JSON.parse(texto) : vazio();
+      const antes = textoDb();
+      db = juntar(daNuvem, db);
+      this.ultimoTexto = texto;
+      salvar(true);
+      if (textoDb() !== texto && (temDados(db) || texto)) this.enviar(true);
+      if (textoDb() !== antes) render(); else atualizarSync();
+      if (primeira && temDados(db)) toast('Sincronizado com sua conta Google');
       primeira = false;
     }, e => { this.estado = 'erro'; console.warn(e); atualizarSync(); });
   },
@@ -145,9 +167,22 @@ function atualizarSync() {
   const s = document.getElementById('syncStatus'); if (s) s.textContent = SYNC_TXT[nuvem.estado];
 }
 let desfazer = null;
+/* Marca o que mudou (mod = agora) e o que foi apagado, para a junção entre aparelhos saber o que é mais novo. */
+function semMod(r) { const { mod, ...x } = r; return JSON.stringify(x); }
+function marcarMudancas(antesDb) {
+  const agora = Date.now();
+  db.apagados = { ...(antesDb.apagados || {}), ...(db.apagados || {}) };
+  for (const k of LISTAS) {
+    const velhos = new Map((antesDb[k] || []).map(r => [r.id, semMod(r)]));
+    const ids = new Set();
+    for (const r of db[k]) { ids.add(r.id); if (velhos.get(r.id) !== semMod(r)) { r.mod = agora; delete db.apagados[r.id]; } }
+    for (const id of velhos.keys()) if (!ids.has(id)) db.apagados[id] = agora;
+  }
+}
 function mudar(fn, msg) {
   const antes = JSON.stringify(db);
   fn();
+  marcarMudancas(JSON.parse(antes));
   salvar();
   desfazer = antes;
   render();
@@ -643,7 +678,8 @@ function formApagarTudo() {
     <div class="field"><label for="x-conf">Para confirmar, digite APAGAR</label><input id="x-conf" name="conf" autocomplete="off"></div>
     <div class="sheet-actions"><span></span><div class="btn-row"><button class="btn" value="cancel">Cancelar</button><button class="btn danger" value="ok">Apagar tudo</button></div></div>`, fd => {
     if (String(fd.get('conf')).trim().toUpperCase() !== 'APAGAR') return erro('conf', 'Digite APAGAR para confirmar.');
-    db = vazio(); salvar(); desfazer = null; view = 'mes'; render(); toast('Dados apagados');
+    mudar(() => { for (const k of LISTAS) db[k] = []; }, null);
+    view = 'mes'; render(); toast('Dados apagados', true);
   });
 }
 
@@ -690,13 +726,20 @@ $('#fileInput').addEventListener('change', async e => {
   try {
     const d = JSON.parse(await f.text());
     if (!Array.isArray(d.lancamentos)) throw new Error('formato');
-    mudar(() => {
-      db = Object.assign(vazio(), {
-        lancamentos: d.lancamentos, receitas: d.receitas || [], assinaturas: d.assinaturas || [],
-        itens: d.itens || {}, categorias: d.categorias?.length ? d.categorias : [...CATS_PADRAO], ultimoBackup: d.ultimoBackup || null, iniciado: true,
-      });
-      db.lancamentos.forEach(l => { if (l.cat && !db.categorias.includes(l.cat)) db.categorias.push(l.cat); if (!db.itens[l.item]) db.itens[l.item] = l.cat; });
-    }, `Importado: ${d.lancamentos.length} contas e ${(d.receitas || []).length} receitas`);
+    // Importar soma ao que já existe (não apaga nada). O que veio do arquivo vale como alteração nova.
+    const agora = Date.now();
+    const doArquivo = {
+      lancamentos: d.lancamentos, receitas: d.receitas || [], assinaturas: d.assinaturas || [],
+      itens: d.itens || {}, categorias: d.categorias?.length ? d.categorias : [...CATS_PADRAO], ultimoBackup: d.ultimoBackup || null, iniciado: true,
+    };
+    for (const k of LISTAS) doArquivo[k] = doArquivo[k].map(r => ({ ...r, mod: Math.max(r.mod || 0, agora) }));
+    desfazer = JSON.stringify(db);
+    db = juntar(db, doArquivo);
+    for (const k of LISTAS) for (const r of db[k]) delete db.apagados[r.id];
+    db.lancamentos.forEach(l => { if (l.cat && !db.categorias.includes(l.cat)) db.categorias.push(l.cat); if (!db.itens[l.item]) db.itens[l.item] = l.cat; });
+    db.iniciado = true;
+    salvar(); render();
+    toast(`Importado: ${d.lancamentos.length} contas e ${(d.receitas || []).length} receitas`, true);
   } catch (err) { toast('Esse arquivo não é um backup do Controle de Gastos.'); }
 });
 
@@ -757,7 +800,7 @@ function toast(msg, comDesfazer) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('show'), 4500);
   const u = $('#undo');
-  if (u) u.onclick = () => { db = JSON.parse(desfazer); desfazer = null; salvar(); render(); el.classList.remove('show'); };
+  if (u) u.onclick = () => { const v = JSON.parse(desfazer); desfazer = null; mudar(() => { db = v; }, null); desfazer = null; el.classList.remove('show'); };
 }
 
 /* Instalação como app */
@@ -767,6 +810,21 @@ $('#installBtn').addEventListener('click', async () => { if (!promptInstalar) re
 addEventListener('appinstalled', () => { $('#installBtn').hidden = true; toast('App instalado!'); });
 if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
+
+/* Recupera os dados que a versão anterior do app substituiu por engano ao sincronizar. */
+try {
+  const resgate = localStorage.getItem(KEY + '-antes-de-sincronizar');
+  if (resgate) {
+    const velho = JSON.parse(resgate);
+    const n = db.lancamentos.length;
+    db = juntar(db, { ...velho, apagados: {} });
+    for (const k of LISTAS) for (const r of db[k]) delete db.apagados[r.id];
+    salvar(true);
+    localStorage.setItem(KEY + '-resgatado', resgate);
+    localStorage.removeItem(KEY + '-antes-de-sincronizar');
+    if (db.lancamentos.length > n) setTimeout(() => toast(`Recuperei ${db.lancamentos.length - n} contas que tinham sumido`), 800);
+  }
+} catch (e) { console.warn(e); }
 
 nuvem.iniciar();
 render();
